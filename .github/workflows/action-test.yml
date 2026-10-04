@@ -55,3 +55,26 @@ jobs:
           test "$(psql "$URL" -XtAc 'select current_user || current_database()')" = appappdb
           test "$(psql "$URL" -XtAc 'show wal_level')" = logical
           psql "$URL" -XtAc 'select count(*) >= 0 from pg_stat_statements'
+
+  older-majors:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['17', '16']
+    steps:
+      - uses: actions/checkout@v7
+      - id: pg
+        uses: ./
+        with:
+          version: ${{ matrix.version }}
+          extensions: vector, postgis
+      - name: The requested major answers, with pgvector and PostGIS
+        env:
+          URL: ${{ steps.pg.outputs.url }}
+          MAJOR: ${{ matrix.version }}
+        run: |
+          test "$(psql "$URL" -XtAc 'show server_version_num' | cut -c1-2)" = "$MAJOR"
+          test "$(psql "$URL" -XtAc "select '[1,2,3]'::vector <-> '[4,5,6]'")" = 5.196152422706632
+          psql "$URL" -XtAc 'select postgis_lib_version()'

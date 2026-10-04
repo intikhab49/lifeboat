@@ -20,20 +20,29 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE_DIR: images/postgresql/18/debian-12
   IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/lifeboat/postgresql
 
 jobs:
   build:
-    name: postgresql 18 (${{ matrix.arch }})
+    name: postgresql ${{ matrix.version }} (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
+        version: ['18', '17', '16']
+        arch: [amd64, arm64]
         include:
           - { arch: amd64, runner: ubuntu-24.04 }
           - { arch: arm64, runner: ubuntu-24.04-arm }
+          # The Bitnami chart line made for each major. Bitnami still releases 18 only, so 18 is the
+          # one major whose image must match Bitnami's current one exactly; 17 and 16 are newer point
+          # releases than Bitnami's last public builds, so their comparison is informational.
+          - { version: '18', chart: 18.12.4, exact_parity: true }
+          - { version: '17', chart: 16.7.27, exact_parity: false }
+          - { version: '16', chart: 15.5.38, exact_parity: false }
+    env:
+      IMAGE_DIR: images/postgresql/${{ matrix.version }}/debian-12
     permissions:
       contents: read
       packages: write
@@ -46,8 +55,9 @@ jobs:
           grep -m1 -E 'model name|^CPU part' /proc/cpuinfo || true
           for f in avx2 fma avx512f fphp asimdhp; do grep -qw "$f" /proc/cpuinfo && printf '%s ' "$f"; done; echo
 
-      # The build cache lives in GHCR: the compiler stages of two architectures outgrow the
-      # 10 GB Actions cache. Pull requests read it anonymously and skip writing it.
+      # The build cache lives in GHCR: the compiler stages of several images outgrow the 10 GB
+      # Actions cache. Every major also reads 18's cache, since the GEOS, PROJ, GDAL and protobuf
+      # stages are the same. Pull requests read it anonymously and skip writing it.
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v4
@@ -64,8 +74,10 @@ jobs:
           platforms: linux/${{ matrix.arch }}
           load: true
           tags: lifeboat/postgresql:ci
-          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}-cache:18-${{ matrix.arch }}
-          cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}-cache:18-{1},mode=max,ignore-error=true', env.IMAGE_NAME, matrix.arch) || '' }}
+          cache-from: |
+            type=registry,ref=${{ env.IMAGE_NAME }}-cache:${{ matrix.version }}-${{ matrix.arch }}
+            type=registry,ref=${{ env.IMAGE_NAME }}-cache:18-${{ matrix.arch }}
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}-cache:{1}-{2},mode=max,ignore-error=true', env.IMAGE_NAME, matrix.version, matrix.arch) || '' }}
 
       - name: pgvector runs on older CPUs
         run: bash scripts/cpu-compat.sh lifeboat/postgresql:ci
@@ -81,6 +93,8 @@ jobs:
 
       - name: Bitnami's Helm chart runs this image (primary and read replica)
         if: matrix.arch == 'amd64'
+        env:
+          CHART_VERSION: ${{ matrix.chart }}
         run: bash scripts/chart-test.sh lifeboat/postgresql:ci chart
 
       - name: Build Bitnami's image as the reference
@@ -90,15 +104,19 @@ jobs:
 
       - name: Parity with Bitnami's image
         if: steps.reference.outcome == 'success'
+        env:
+          EXACT: ${{ matrix.exact_parity }}
         run: |
           bash scripts/parity.sh bitnami-reference/postgresql:ci lifeboat/postgresql:ci parity
-          bash scripts/smoke-postgresql.sh bitnami-reference/postgresql:ci > reference.transcript
+          bash scripts/smoke-postgresql.sh bitnami-reference/postgresql:ci > reference.transcript || true
           { echo; echo '## Behavior diff'; echo '```diff'; diff -u reference.transcript candidate.transcript || true; echo '```'; } >> parity/report.md
           cat parity/report.md >> "$GITHUB_STEP_SUMMARY"
           # Same scripts from the same upstream commit, so once Bitnami's image passes its own run,
           # any difference is a regression here. When it doesn't (its pgvector needs AVX-512, which
-          # many runners lack), the diff is reported instead.
-          if grep -qx 'failures: 0' reference.transcript; then
+          # many runners lack), or when lifeboat ships a newer point release, the diff is reported.
+          if [[ "$EXACT" != true ]]; then
+            echo "::notice::$IMAGE_DIR is newer than Bitnami's last public build of this major; the diff is informational."
+          elif grep -qx 'failures: 0' reference.transcript; then
             diff -q reference.transcript candidate.transcript
           else
             echo "::warning::Bitnami's image failed its own behavior checks on this runner ($(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2 | xargs)); see the report."
@@ -121,7 +139,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: parity-${{ matrix.arch }}
+          name: parity-${{ matrix.version }}-${{ matrix.arch }}
           path: |
             parity/report.md
             *.transcript
@@ -139,7 +157,9 @@ jobs:
           outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
           provenance: mode=max
           sbom: true
-          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}-cache:18-${{ matrix.arch }}
+          cache-from: |
+            type=registry,ref=${{ env.IMAGE_NAME }}-cache:${{ matrix.version }}-${{ matrix.arch }}
+            type=registry,ref=${{ env.IMAGE_NAME }}-cache:18-${{ matrix.arch }}
 
       - name: Export digest
         if: steps.push.outcome == 'success'
@@ -150,15 +170,25 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: steps.push.outcome == 'success'
         with:
-          name: digest-${{ matrix.arch }}
+          name: digest-${{ matrix.version }}-${{ matrix.arch }}
           path: digests/*
           retention-days: 1
 
   publish:
-    name: publish multi-arch tags
+    name: publish postgresql ${{ matrix.version }}
     needs: build
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && !github.event.repository.private
+    # Each major publishes once both of its architectures built, even if another major failed.
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && !github.event.repository.private }}
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { version: '18', newest: true }
+          - { version: '17', newest: false }
+          - { version: '16', newest: false }
+    env:
+      IMAGE_DIR: images/postgresql/${{ matrix.version }}/debian-12
     permissions:
       contents: read
       packages: write
@@ -167,8 +197,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
+        continue-on-error: true
         with:
-          pattern: digest-*
+          pattern: digest-${{ matrix.version }}-*
           merge-multiple: true
           path: digests
       - uses: docker/setup-buildx-action@v4
@@ -180,10 +211,21 @@ jobs:
 
       - name: Tag the multi-arch image
         id: tags
+        env:
+          NEWEST: ${{ matrix.newest }}
         run: |
+          if [[ "$(ls digests 2>/dev/null | wc -l)" -lt 2 ]]; then
+            echo "::warning::postgresql ${{ matrix.version }} did not build on both architectures; nothing published."
+            exit 0
+          fi
           version="$(sed -n 's/^ARG POSTGRESQL_VERSION=//p' "$IMAGE_DIR/Dockerfile")"
-          revision="$(sed -n 's/^ARG IMAGE_REVISION=//p' "$IMAGE_DIR/Dockerfile")"
-          tags=("$version.0" "$version" "${version%%.*}" "$version.0-debian-12-r$revision" latest)
+          tags=("$version.0" "$version" "${version%%.*}")
+          # Only the newest major tracks Bitnami's current release, so only it carries Bitnami's
+          # revision tag, and latest.
+          if [[ "$NEWEST" == true ]]; then
+            revision="$(sed -n 's/^ARG IMAGE_REVISION=//p' "$IMAGE_DIR/Dockerfile")"
+            tags+=("$version.0-debian-12-r$revision" latest)
+          fi
           args=()
           for t in "${tags[@]}"; do args+=(-t "$IMAGE_NAME:$t"); done
           docker buildx imagetools create "${args[@]}" $(printf "$IMAGE_NAME@sha256:%s " $(ls digests))
@@ -191,6 +233,7 @@ jobs:
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Attest build provenance
+        if: steps.tags.outputs.digest != ''
         uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.IMAGE_NAME }}

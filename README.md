@@ -6,7 +6,7 @@
 [![build](https://github.com/intikhab49/lifeboat/actions/workflows/build.yml/badge.svg)](https://github.com/intikhab49/lifeboat/actions/workflows/build.yml)
 [![GitHub Marketplace](https://img.shields.io/badge/Marketplace-lifeboat-ff5b1f?logo=github)](https://github.com/marketplace/actions/postgresql-with-pgvector-and-postgis-lifeboat)
 [![image](https://img.shields.io/badge/ghcr.io-lifeboat%2Fpostgresql-0e2a47?logo=docker&logoColor=white)](https://github.com/intikhab49/lifeboat/pkgs/container/lifeboat%2Fpostgresql)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18.6-336791?logo=postgresql&logoColor=white)](images/postgresql/18/debian-12/Dockerfile)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18.6%20%7C%2017.11%20%7C%2016.15-336791?logo=postgresql&logoColor=white)](#tags)
 [![arch](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-ff5b1f)](#tags)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
@@ -59,7 +59,7 @@ helm install db oci://registry-1.docker.io/bitnamicharts/postgresql \
 > [!NOTE]
 > The chart refuses images it doesn't know (`Original containers have been substituted for
 > unrecognized ones`), hence the last flag. CI installs the real chart in replication mode with
-> this image on every build.
+> each image on every build: chart 18.12.4 with 18, 16.7.27 with 17 and 15.5.38 with 16.
 
 Every `POSTGRESQL_*` variable, `/docker-entrypoint-initdb.d`, the `/bitnami/postgresql` volume,
 UID 1001, replication mode and arbitrary-UID support (OpenShift) work the same way, because they
@@ -71,6 +71,17 @@ are Bitnami's own scripts.
 |---|---|
 | `18.6.0-debian-12-r14` | same version, OS and scripts revision as Bitnami's tag of that name |
 | `18.6.0`, `18.6`, `18`, `latest` | moving tags, as on Bitnami |
+| `17.11.0`, `17.11`, `17` | PostgreSQL 17 |
+| `16.15.0`, `16.15`, `16` | PostgreSQL 16, with pg_auto_failover as in Bitnami's 16 |
+
+Bitnami no longer releases 17 or 16. Their last public builds were `17.6.0-debian-12-r10` and
+`16.9.0-debian-12-r13`, and neither tag can be pulled from Docker Hub today. lifeboat runs the
+scripts from those two releases on the current point release of each major, with the same
+components as 18. If your setup pins one of Bitnami's old 17 or 16 tags, use `17` or `16`: a newer
+point release of the same major reads the same data directory, so nothing needs a dump and
+restore. The extensions are newer than in those builds (PostGIS 3.6.4 instead of 3.4.4, pgvector
+0.8.7 instead of 0.8.0 or 0.8.1), so after switching, run `SELECT postgis_extensions_upgrade();`
+and `ALTER EXTENSION vector UPDATE;` in the databases that use them.
 
 ## GitHub Actions
 
@@ -86,7 +97,7 @@ As a step, with extensions ready to use:
 
 | Input | Default | What it does |
 |---|---|---|
-| `version` | `18` | image tag, for example `18.6.0` |
+| `version` | `18` | image tag, for example `17` or `18.6.0` |
 | `port` | `5432` | host port |
 | `username`, `password`, `database` | `postgres` | `POSTGRESQL_USERNAME`, `POSTGRESQL_PASSWORD`, `POSTGRESQL_DATABASE` |
 | `extensions` | | created in that database, for example `vector, postgis` |
@@ -159,6 +170,10 @@ LOG:  terminating any other active server processes
 LOG:  all server processes terminated; reinitializing
 ```
 
+Bitnami's last PostgreSQL 17 image, 17.6.0, does the same. In this repo's CI, on an AMD EPYC 7763
+(AVX2, no AVX-512), its HNSW index build crashed the server, which restarted in recovery mode.
+lifeboat's 17 passed the same test on the same machine.
+
 Check any copy with `scripts/cpu-compat.sh IMAGE`.
 
 ## Proof it's the same image
@@ -180,6 +195,10 @@ compares the two. Results for 18.6.0 on amd64, from the run of 2026-10-04:
 Each run's summary on the Actions tab has the full file-level diff and the components Trivy finds
 in both images. Every difference that remains is listed below.
 
+17 and 16 go through the same CPU, behavior and Helm chart checks on every build. Their comparison
+with Bitnami's last builds of those majors (17.6.0 and 16.9.0) is informational, since lifeboat's
+are newer point releases with newer components.
+
 ## Differences from Bitnami's image
 
 The ones that change how something is built are marked `Deviation:` in the Dockerfile.
@@ -199,8 +218,8 @@ The ones that change how something is built are marked `Deviation:` in the Docke
 
 **`bitnami/postgresql:<version>` says "not found" or "manifest unknown". What happened?** Broadcom
 deleted the versioned tags in 2025. Point the same setup at
-`ghcr.io/intikhab49/lifeboat/postgresql:<version>`; the environment variables and volume paths
-don't change.
+`ghcr.io/intikhab49/lifeboat/postgresql:<version>`, or at `:17` or `:16` for an old 17 or 16 tag
+([Tags](#tags)); the environment variables and volume paths don't change.
 
 **My Bitnami PostgreSQL chart is stuck in `ImagePullBackOff`.** Same cause. Override
 `image.registry`, `image.repository` and `image.tag` as shown in [Use it](#use-it), plus

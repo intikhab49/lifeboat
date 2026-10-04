@@ -6,7 +6,7 @@ branding:
   color: orange
 inputs:
   version:
-    description: Image tag, for example 18, 18.6 or 18.6.0. Pin a full version for reproducible builds.
+    description: Image tag, for example 18, 17, 16 or 18.6.0. Pin a full version for reproducible builds.
     required: false
     default: '18'
   port:

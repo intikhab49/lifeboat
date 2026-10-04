@@ -1,0 +1,5 @@
+repo=https://github.com/bitnami/containers
+path=bitnami/postgresql/16/debian-12
+commit=0191828691ccfad53afb58d918ce2dd3105e1f6b
+# Bitnami's last public release of this major, 16.9.0-debian-12-r13 (2025-06-27). Bitnami removed the directory
+# on 2025-06-27, so scripts/sync-from-bitnami.sh does not apply here: bump versions by hand.

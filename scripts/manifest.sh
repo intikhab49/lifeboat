@@ -14,7 +14,11 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq >/dev/null
 apt-get install -y -qq --no-install-recommends binutils file >/dev/null 2>&1
 
-prefixes=(/opt/bitnami/postgresql /opt/bitnami/common /opt/bitnami/protobuf)
+# Older Bitnami releases have no /opt/bitnami/protobuf, so walk only the prefixes an image has.
+prefixes=()
+for d in /opt/bitnami/postgresql /opt/bitnami/common /opt/bitnami/protobuf; do
+  [[ -d "$d" ]] && prefixes+=("$d")
+done
 pg_bin=/opt/bitnami/postgresql/bin
 
 echo "## files"
@@ -48,18 +52,20 @@ find "${prefixes[@]}" -type f | while read -r f; do
 done | sort
 
 echo "## versions"
+# v TOOL ARGS: runs TOOL, or reports it missing, so a component one image lacks shows up in the diff.
+v() { if [[ -x "$1" ]]; then "$@"; else echo "absent: $1"; fi; }
 {
-  "$pg_bin/postgres" --version
-  "$pg_bin/psql" --version
-  "$pg_bin/pgbackrest" version
-  echo "gdal $("$pg_bin/gdal-config" --version)"
-  echo "geos $("$pg_bin/geos-config" --version)"
+  v "$pg_bin/postgres" --version
+  v "$pg_bin/psql" --version
+  v "$pg_bin/pgbackrest" version
+  echo "gdal $(v "$pg_bin/gdal-config" --version)"
+  echo "geos $(v "$pg_bin/geos-config" --version)"
   # sed/grep read their whole input; head would close the pipe early (SIGPIPE, exit 141).
-  "$pg_bin/proj" 2>&1 | sed -n 1p
-  /opt/bitnami/protobuf/bin/protoc --version
+  v "$pg_bin/proj" 2>&1 | sed -n 1p
+  v /opt/bitnami/protobuf/bin/protoc --version
   # protoc-c also logs a timestamped Abseil warning, which would differ on every run.
-  /opt/bitnami/common/bin/protoc-c --version 2>&1 | grep -vE '^WARNING: All log messages|^W[0-9]{4} '
-  echo "unixodbc $(/opt/bitnami/common/bin/odbc_config --version)"
+  v /opt/bitnami/common/bin/protoc-c --version 2>&1 | grep -vE '^WARNING: All log messages|^W[0-9]{4} '
+  echo "unixodbc $(v /opt/bitnami/common/bin/odbc_config --version)"
 } 2>&1
 
 echo "## gdal-formats"

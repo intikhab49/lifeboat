@@ -77,10 +77,15 @@ done
 say "postgis: $(su 'select postgis_full_version()' exttest)"
 say "pgvector: $(su "create table items (id int, e vector(3)); insert into items values (1, '[1,2,3]'), (2, '[4,5,6]'), (3, '[3,1,2]'); create index on items using hnsw (e vector_l2_ops); set enable_seqscan = off; select string_agg(id::text, ',' order by e <-> '[3,1,2]') from items" exttest | tail -n 1)"
 say "pgvector distance: $(su "select '[1,2,3]'::vector <-> '[4,5,6]'" exttest)"
-# PostgreSQL 18.6 only accepts pgoutput and test_decoding as output plugins unless the session
-# allows more at connection time (a SET in the same query is too late).
+# Recent point releases only accept pgoutput and test_decoding as output plugins unless the session
+# allows more at connection time (a SET in the same query is too late). Older ones have no such
+# setting, and naming it there would refuse the connection.
+w2j_opts=""
+if [[ "$(su "select count(*) from pg_settings where name = 'output_plugin_libraries'")" == 1 ]]; then
+  w2j_opts='-c output_plugin_libraries=pgoutput,test_decoding,wal2json'
+fi
 w2j() {
-  docker exec -e PGPASSWORD=superpw -e PGOPTIONS='-c output_plugin_libraries=pgoutput,test_decoding,wal2json' \
+  docker exec -e PGPASSWORD=superpw -e PGOPTIONS="$w2j_opts" \
     "$p-main" psql -h 127.0.0.1 -U postgres -d exttest -v ON_ERROR_STOP=1 -XtAq -c "$1" 2>&1
 }
 w2j "select 'slot' from pg_create_logical_replication_slot('lb_slot', 'wal2json')" >/dev/null || fail "wal2json slot"

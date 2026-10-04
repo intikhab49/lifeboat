@@ -5,6 +5,9 @@ updates:
     schedule:
       interval: weekly
   - package-ecosystem: docker
-    directory: /images/postgresql/18/debian-12
+    directories:
+      - /images/postgresql/18/debian-12
+      - /images/postgresql/17/debian-12
+      - /images/postgresql/16/debian-12
     schedule:
       interval: weekly
