@@ -5,11 +5,13 @@ on:
     branches: [main]
     paths-ignore: ['**.md', 'docs/**', 'LICENSE', 'NOTICE', '.github/assets/**', '.github/ISSUE_TEMPLATE/**',
                    'action.yml', '.github/workflows/action-test.yml', '.github/workflows/sync.yml',
-                   'scripts/sync-from-bitnami.sh']
+                   'scripts/sync-from-bitnami.sh', 'scripts/align-majors.sh', 'scripts/bump-postgresql-minor.sh',
+                   'scripts/readme-version.sh']
   pull_request:
     paths-ignore: ['**.md', 'docs/**', 'LICENSE', 'NOTICE', '.github/assets/**', '.github/ISSUE_TEMPLATE/**',
                    'action.yml', '.github/workflows/action-test.yml', '.github/workflows/sync.yml',
-                   'scripts/sync-from-bitnami.sh']
+                   'scripts/sync-from-bitnami.sh', 'scripts/align-majors.sh', 'scripts/bump-postgresql-minor.sh',
+                   'scripts/readme-version.sh']
   schedule:
     - cron: '23 4 * * 1' # weekly rebuild picks up Debian security updates
   workflow_dispatch:
@@ -22,29 +24,39 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/lifeboat/postgresql
+  REGISTRY: ghcr.io/${{ github.repository_owner }}/lifeboat
+  # One build cache for every image; each also reads postgresql 18's, whose stages they share.
+  CACHE: ghcr.io/${{ github.repository_owner }}/lifeboat/postgresql-cache
 
 jobs:
   build:
-    name: postgresql ${{ matrix.version }} (${{ matrix.arch }})
+    name: ${{ matrix.image }} ${{ matrix.version }} (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
-        version: ['18', '17', '16']
+        target: ['18', '17', '16', repmgr-18]
         arch: [amd64, arm64]
         include:
           - { arch: amd64, runner: ubuntu-24.04 }
           - { arch: arm64, runner: ubuntu-24.04-arm }
-          # The Bitnami chart line made for each major. Bitnami still releases 18 only, so 18 is the
-          # one major whose image must match Bitnami's current one exactly; 17 and 16 are newer point
-          # releases than Bitnami's last public builds, so their comparison is informational.
-          - { version: '18', chart: 18.12.4, exact_parity: true }
-          - { version: '17', chart: 16.7.27, exact_parity: false }
-          - { version: '16', chart: 15.5.38, exact_parity: false }
+          # The Bitnami chart line made for each image. Bitnami still releases postgresql 18 and
+          # postgresql-repmgr 18, so those must match Bitnami's current images exactly; 17 and 16
+          # are newer point releases than Bitnami's last public builds, so their comparison is
+          # informational.
+          - { target: '18', image: postgresql, version: '18', exact_parity: true,
+              smoke: smoke-postgresql.sh, chart_test: chart-test.sh, chart: 18.12.4 }
+          - { target: '17', image: postgresql, version: '17', exact_parity: false,
+              smoke: smoke-postgresql.sh, chart_test: chart-test.sh, chart: 16.7.27 }
+          - { target: '16', image: postgresql, version: '16', exact_parity: false,
+              smoke: smoke-postgresql.sh, chart_test: chart-test.sh, chart: 15.5.38 }
+          - { target: repmgr-18, image: postgresql-repmgr, version: '18', exact_parity: true,
+              smoke: smoke-repmgr.sh, chart_test: chart-test-ha.sh, chart: 16.3.2 }
     env:
-      IMAGE_DIR: images/postgresql/${{ matrix.version }}/debian-12
+      IMAGE_DIR: images/${{ matrix.image }}/${{ matrix.version }}/debian-12
+      CI_IMAGE: lifeboat/${{ matrix.image }}:ci
+      REFERENCE_IMAGE: bitnami-reference/${{ matrix.image }}:ci
     permissions:
       contents: read
       packages: write
@@ -58,8 +70,9 @@ jobs:
           for f in avx2 fma avx512f fphp asimdhp; do grep -qw "$f" /proc/cpuinfo && printf '%s ' "$f"; done; echo
 
       # The build cache lives in GHCR: the compiler stages of several images outgrow the 10 GB
-      # Actions cache. Every major also reads 18's cache, since the GEOS, PROJ, GDAL and protobuf
-      # stages are the same. Pull requests read it anonymously and skip writing it.
+      # Actions cache. Every image also reads postgresql 18's cache, since the GEOS, PROJ, GDAL and
+      # protobuf stages are the same (all but one, for repmgr). Pull requests read it anonymously
+      # and skip writing it.
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v4
@@ -81,17 +94,17 @@ jobs:
           platforms: linux/${{ matrix.arch }}
           build-args: DEBIAN_REFRESH=${{ steps.week.outputs.week }}
           load: true
-          tags: lifeboat/postgresql:ci
+          tags: ${{ env.CI_IMAGE }}
           cache-from: |
-            type=registry,ref=${{ env.IMAGE_NAME }}-cache:${{ matrix.version }}-${{ matrix.arch }}
-            type=registry,ref=${{ env.IMAGE_NAME }}-cache:18-${{ matrix.arch }}
-          cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}-cache:{1}-{2},mode=max,ignore-error=true', env.IMAGE_NAME, matrix.version, matrix.arch) || '' }}
+            type=registry,ref=${{ env.CACHE }}:${{ matrix.target }}-${{ matrix.arch }}
+            type=registry,ref=${{ env.CACHE }}:18-${{ matrix.arch }}
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}:{1}-{2},mode=max,ignore-error=true', env.CACHE, matrix.target, matrix.arch) || '' }}
 
       - name: pgvector runs on older CPUs
-        run: bash scripts/cpu-compat.sh lifeboat/postgresql:ci
+        run: bash scripts/cpu-compat.sh "$CI_IMAGE"
 
-      - name: Behavior (env vars, init scripts, extensions, nss_wrapper, replication)
-        run: bash scripts/smoke-postgresql.sh lifeboat/postgresql:ci | tee candidate.transcript
+      - name: Behavior (postgresql - env vars, init scripts, extensions, replication; repmgr - failover)
+        run: bash "scripts/${{ matrix.smoke }}" "$CI_IMAGE" | tee candidate.transcript
 
       - name: Start a kind cluster
         if: matrix.arch == 'amd64'
@@ -99,24 +112,34 @@ jobs:
         with:
           cluster_name: chart
 
-      - name: Bitnami's Helm chart runs this image (primary and read replica)
+      - name: Bitnami's Helm chart runs this image (postgresql - read replica; repmgr - postgresql-ha)
         if: matrix.arch == 'amd64'
         env:
           CHART_VERSION: ${{ matrix.chart }}
-        run: bash scripts/chart-test.sh lifeboat/postgresql:ci chart
+        run: bash "scripts/${{ matrix.chart_test }}" "$CI_IMAGE" chart
 
       - name: Build Bitnami's image as the reference
         id: reference
         continue-on-error: true # needs downloads.bitnami.com, which Broadcom can close at any time
-        run: bash scripts/build-reference.sh "$IMAGE_DIR" bitnami-reference/postgresql:ci
+        run: bash scripts/build-reference.sh "$IMAGE_DIR" "$REFERENCE_IMAGE"
+
+      # Which CPUs Bitnami's own image runs on (its pgvector is built with -march=native), for the
+      # crash table in the README. Informational: it fails wherever Bitnami's build host differs.
+      - name: Bitnami's image on older CPUs
+        if: steps.reference.outcome == 'success'
+        continue-on-error: true
+        run: |
+          bash scripts/cpu-compat.sh "$REFERENCE_IMAGE" | tee reference-cpu.txt || true
+          { echo "## Bitnami's image on older CPUs ($(grep -m1 -E 'model name|^CPU part' /proc/cpuinfo | cut -d: -f2 | xargs))"
+            echo '```'; cat reference-cpu.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Parity with Bitnami's image
         if: steps.reference.outcome == 'success'
         env:
           EXACT: ${{ matrix.exact_parity }}
         run: |
-          bash scripts/parity.sh bitnami-reference/postgresql:ci lifeboat/postgresql:ci parity
-          bash scripts/smoke-postgresql.sh bitnami-reference/postgresql:ci > reference.transcript || true
+          bash scripts/parity.sh "$REFERENCE_IMAGE" "$CI_IMAGE" parity
+          bash "scripts/${{ matrix.smoke }}" "$REFERENCE_IMAGE" > reference.transcript || true
           { echo; echo '## Behavior diff'; echo '```diff'; diff -u reference.transcript candidate.transcript || true; echo '```'; } >> parity/report.md
           cat parity/report.md >> "$GITHUB_STEP_SUMMARY"
           # Same scripts from the same upstream commit, so once Bitnami's image passes its own run,
@@ -135,8 +158,8 @@ jobs:
         continue-on-error: true
         run: |
           for side in reference candidate; do
-            image=bitnami-reference/postgresql:ci
-            [[ $side == candidate ]] && image=lifeboat/postgresql:ci
+            image="$REFERENCE_IMAGE"
+            [[ $side == candidate ]] && image="$CI_IMAGE"
             docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.75.0 image --quiet \
               --scanners vuln --pkg-types library --list-all-pkgs --format json "$image" \
               | jq -r '.Results[]? | select(.Type == "bitnami") | .Packages[]? | "\(.Name) \(.Version)"' | sort > "trivy-$side.txt"
@@ -147,11 +170,12 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: parity-${{ matrix.version }}-${{ matrix.arch }}
+          name: parity-${{ matrix.target }}-${{ matrix.arch }}
           path: |
             parity/report.md
             *.transcript
             trivy-*.txt
+            reference-cpu.txt
           if-no-files-found: ignore
 
       - name: Push by digest
@@ -163,12 +187,12 @@ jobs:
           file: ${{ env.IMAGE_DIR }}/Dockerfile
           platforms: linux/${{ matrix.arch }}
           build-args: DEBIAN_REFRESH=${{ steps.week.outputs.week }}
-          outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
           provenance: mode=max
           sbom: true
           cache-from: |
-            type=registry,ref=${{ env.IMAGE_NAME }}-cache:${{ matrix.version }}-${{ matrix.arch }}
-            type=registry,ref=${{ env.IMAGE_NAME }}-cache:18-${{ matrix.arch }}
+            type=registry,ref=${{ env.CACHE }}:${{ matrix.target }}-${{ matrix.arch }}
+            type=registry,ref=${{ env.CACHE }}:18-${{ matrix.arch }}
 
       - name: Export digest
         if: steps.push.outcome == 'success'
@@ -179,25 +203,27 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: steps.push.outcome == 'success'
         with:
-          name: digest-${{ matrix.version }}-${{ matrix.arch }}
+          name: digest-${{ matrix.target }}-${{ matrix.arch }}
           path: digests/*
           retention-days: 1
 
   publish:
-    name: publish postgresql ${{ matrix.version }}
+    name: publish ${{ matrix.image }} ${{ matrix.version }}
     needs: build
-    # Each major publishes once both of its architectures built, even if another major failed.
+    # Each image publishes once both of its architectures built, even if another one failed.
     if: ${{ !cancelled() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && !github.event.repository.private }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { version: '18', newest: true }
-          - { version: '17', newest: false }
-          - { version: '16', newest: false }
+          - { target: '18', image: postgresql, version: '18', newest: true }
+          - { target: '17', image: postgresql, version: '17', newest: false }
+          - { target: '16', image: postgresql, version: '16', newest: false }
+          - { target: repmgr-18, image: postgresql-repmgr, version: '18', newest: true }
     env:
-      IMAGE_DIR: images/postgresql/${{ matrix.version }}/debian-12
+      IMAGE_DIR: images/${{ matrix.image }}/${{ matrix.version }}/debian-12
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/lifeboat/${{ matrix.image }}
     permissions:
       contents: read
       packages: write
@@ -208,7 +234,7 @@ jobs:
       - uses: actions/download-artifact@v8
         continue-on-error: true
         with:
-          pattern: digest-${{ matrix.version }}-*
+          pattern: digest-${{ matrix.target }}-*
           merge-multiple: true
           path: digests
       - uses: docker/setup-buildx-action@v4
@@ -224,13 +250,12 @@ jobs:
           NEWEST: ${{ matrix.newest }}
         run: |
           if [[ "$(ls digests 2>/dev/null | wc -l)" -lt 2 ]]; then
-            echo "::warning::postgresql ${{ matrix.version }} did not build on both architectures; nothing published."
+            echo "::warning::${{ matrix.image }} ${{ matrix.version }} did not build on both architectures; nothing published."
             exit 0
           fi
           version="$(sed -n 's/^ARG POSTGRESQL_VERSION=//p' "$IMAGE_DIR/Dockerfile")"
           tags=("$version.0" "$version" "${version%%.*}")
-          # Only the newest major tracks Bitnami's current release, so only it carries Bitnami's
-          # revision tag, and latest.
+          # Only images that track Bitnami's current release carry Bitnami's revision tag, and latest.
           if [[ "$NEWEST" == true ]]; then
             revision="$(sed -n 's/^ARG IMAGE_REVISION=//p' "$IMAGE_DIR/Dockerfile")"
             tags+=("$version.0-debian-12-r$revision" latest)

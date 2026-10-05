@@ -16,34 +16,43 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Sync with Bitnami's latest release
+      - name: Sync with Bitnami's latest releases
         id: sync
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          bash scripts/sync-from-bitnami.sh images/postgresql/18/debian-12 | tee sync.log
-          # 17 and 16 carry 18's components, so one pull request moves all three majors.
-          bash scripts/align-majors.sh | tee -a sync.log
+          {
+            echo "postgresql 18:"
+            bash scripts/sync-from-bitnami.sh images/postgresql/18/debian-12
+            echo "postgresql-repmgr 18:"
+            bash scripts/sync-from-bitnami.sh images/postgresql-repmgr/18/debian-12
+            # 17, 16 and repmgr carry 18's components, so one pull request moves every image.
+            bash scripts/align-majors.sh
+          } | tee sync.log
           if [[ -n "$(git status --porcelain)" ]]; then echo "changed=true" >> "$GITHUB_OUTPUT"; fi
 
       - name: Open a pull request
         if: steps.sync.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          IMAGE_DIR: images/postgresql/18/debian-12
         run: |
-          commit="$(sed -n 's/^commit=//p' "$IMAGE_DIR/UPSTREAM")"
-          version="$(sed -n 's/^ARG POSTGRESQL_VERSION=//p' "$IMAGE_DIR/Dockerfile")"
-          revision="$(sed -n 's/^ARG IMAGE_REVISION=//p' "$IMAGE_DIR/Dockerfile")"
-          branch="sync/postgresql-18-${commit:0:12}"
-          title="postgresql 18: sync with Bitnami ${version}.0-debian-12-r${revision}"
+          tag() { # tag IMAGE: the Bitnami tag an image directory is synced to
+            local dir="images/$1/18/debian-12"
+            printf '%s.0-debian-12-r%s' "$(sed -n 's/^ARG POSTGRESQL_VERSION=//p' "$dir/Dockerfile")" \
+              "$(sed -n 's/^ARG IMAGE_REVISION=//p' "$dir/Dockerfile")"
+          }
+          commit() { sed -n 's/^commit=//p' "images/$1/18/debian-12/UPSTREAM"; }
+          pg="$(commit postgresql)" repmgr="$(commit postgresql-repmgr)"
+          branch="sync/bitnami-${pg:0:8}-${repmgr:0:8}"
+          title="sync with Bitnami: postgresql $(tag postgresql), postgresql-repmgr $(tag postgresql-repmgr)"
+          commit="$pg (postgresql), $repmgr (postgresql-repmgr)"
           if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
             echo "$branch already exists"; exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git switch -c "$branch"
-          git add -A images/postgresql README.md action.yml .github/workflows/action-test.yml
+          git add -A images README.md action.yml .github/workflows/action-test.yml
           git commit -m "$title"
           git push origin "$branch"
           printf 'Automated sync from bitnami/containers@%s.\n\n```\n%s\n```\n' "$commit" "$(cat sync.log)" > body.md

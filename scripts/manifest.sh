@@ -14,9 +14,10 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq >/dev/null
 apt-get install -y -qq --no-install-recommends binutils file >/dev/null 2>&1
 
-# Older Bitnami releases have no /opt/bitnami/protobuf, so walk only the prefixes an image has.
+# Older Bitnami releases have no /opt/bitnami/protobuf and only postgresql-repmgr has
+# /opt/bitnami/repmgr, so walk only the prefixes an image has.
 prefixes=()
-for d in /opt/bitnami/postgresql /opt/bitnami/common /opt/bitnami/protobuf; do
+for d in /opt/bitnami/postgresql /opt/bitnami/common /opt/bitnami/protobuf /opt/bitnami/repmgr; do
   [[ -d "$d" ]] && prefixes+=("$d")
 done
 pg_bin=/opt/bitnami/postgresql/bin
@@ -58,6 +59,7 @@ v() { if [[ -x "$1" ]]; then "$@"; else echo "absent: $1"; fi; }
   v "$pg_bin/postgres" --version
   v "$pg_bin/psql" --version
   v "$pg_bin/pgbackrest" version
+  if [[ -d /opt/bitnami/repmgr ]]; then v /opt/bitnami/repmgr/bin/repmgr --version; fi
   echo "gdal $(v "$pg_bin/gdal-config" --version)"
   echo "geos $(v "$pg_bin/geos-config" --version)"
   # sed/grep read their whole input; head would close the pipe early (SIGPIPE, exit 141).
@@ -72,7 +74,9 @@ echo "## gdal-formats"
 "$pg_bin/gdalinfo" --formats 2>/dev/null | sed 1d | awk '{print $1}' | sort
 
 echo "## scripts"
+# postgresql-repmgr also has repmgr's event hooks in /events.
 find /opt/bitnami/scripts /usr/sbin/install_packages /usr/sbin/uninstall_packages /usr/sbin/run-script \
+  $([[ -d /events ]] && echo /events) \
   -type f -exec sha256sum {} + | awk '{print $2, $1}' | sort
 
 echo "## licenses"

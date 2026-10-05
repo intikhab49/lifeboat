@@ -5,6 +5,7 @@
 # the package (the first few KB of the stream); no Bitnami binary is used.
 # Needs: gh (authenticated), curl, git, sha256sum.
 # Usage: scripts/sync-from-bitnami.sh images/postgresql/18/debian-12
+#        scripts/sync-from-bitnami.sh images/postgresql-repmgr/18/debian-12
 set -euo pipefail
 export LC_ALL=C
 
@@ -24,7 +25,7 @@ echo "bitnami: $current -> $latest"
 
 theirs="$(curl -fsSL "https://raw.githubusercontent.com/$slug/$latest/$path/Dockerfile")"
 before="$(curl -fsSL "https://raw.githubusercontent.com/$slug/$current/$path/Dockerfile")"
-component="$(grep -oE '"postgresql-[0-9][^"]*-linux-\$\{OS_ARCH\}-debian-[0-9]+"' <<<"$theirs" | tr -d '"')"
+component="$(grep -oE '"postgresql(-repmgr)?-[0-9][^"]*-linux-\$\{OS_ARCH\}-debian-[0-9]+"' <<<"$theirs" | tr -d '"')"
 component="${component/\$\{OS_ARCH\}/amd64}"
 nss="$(grep -oE 'nss-wrapper-[0-9.]+-[0-9]+' <<<"$theirs" | sed -n 1p)"
 
@@ -57,6 +58,7 @@ new[PGBACKREST]="$(pick '.*/pgbackrest-([0-9.]+)\.tar\.gz')"
 new[PGVECTOR]="$(pick '.*/pgvector/pgvector#refs/tags/v([0-9.]+)')"
 new[PGFAILOVERSLOTS]="$(pick '.*/pg_failover_slots#refs/tags/v([0-9.]+)')"
 new[WAL2JSON]="$(pick '.*/wal2json_([0-9_]+)\.tar\.gz' | tr _ .)"
+new[REPMGR]="$(pick '.*/repmgr-([0-9.]+)[.]tar[.]gz')"
 new[NSSWRAPPER]="$(sed -E 's/^nss-wrapper-([0-9.]+)-[0-9]+$/\1/' <<<"$nss")"
 
 # Where lifeboat downloads each source; keep in step with the Dockerfile's fetch lines.
@@ -83,19 +85,26 @@ url() {
     PGFAILOVERSLOTS) echo "https://github.com/EnterpriseDB/pg_failover_slots/archive/refs/tags/v$v.tar.gz" ;;
     WAL2JSON) echo "https://github.com/eulerto/wal2json/archive/refs/tags/wal2json_${v//./_}.tar.gz" ;;
     NSSWRAPPER) echo "https://ftp.samba.org/pub/cwrap/nss_wrapper-$v.tar.gz" ;;
+    REPMGR) echo "https://github.com/EnterpriseDB/repmgr/releases/download/v$v/repmgr-$v.tar.gz" ;;
   esac
 }
 
 set_arg() { sed -i "s|^ARG $1=.*|ARG $1=$2|" "$dockerfile"; }
 arg() { sed -n "s/^ARG $1=//p" "$dockerfile"; }
 old_tag="$(arg POSTGRESQL_VERSION).0-debian-12-r$(arg IMAGE_REVISION)"
+# Lines of the README about postgresql-repmgr mention repmgr; each image touches only its own.
+image="$(basename "$(dirname "$(dirname "$dir")")")"
+if [[ "$image" == postgresql-repmgr ]]; then only=repmgr lines="/repmgr/"; else only="" lines="/repmgr/!"; fi
 old_version="$(arg POSTGRESQL_VERSION)"
 
 for name in POSTGRESQL GEOS PROJ GDAL JSONC ORAFCE PLJAVA UNIXODBC PSQLODBC PROTOBUF ABSEIL PROTOBUFC \
-            POSTGIS PGAUDIT PGBACKREST PGVECTOR PGFAILOVERSLOTS WAL2JSON NSSWRAPPER; do
+            POSTGIS PGAUDIT PGBACKREST PGVECTOR PGFAILOVERSLOTS WAL2JSON NSSWRAPPER REPMGR; do
   v="${new[$name]}"
-  [[ -n "$v" ]] || { echo "sync: $name not found in BUILD.txt; the recipe changed, update this script" >&2; exit 1; }
   old="$(sed -n "s/^ARG ${name}_VERSION=//p" "$dockerfile")"
+  # repmgr is only in the postgresql-repmgr package.
+  [[ -z "$v" && -z "$old" && "$name" == REPMGR ]] && continue
+  [[ -n "$old" || -z "$v" ]] || { echo "sync: Bitnami now bundles $name; add it to $dockerfile" >&2; exit 1; }
+  [[ -n "$v" ]] || { echo "sync: $name not found in BUILD.txt; the recipe changed, update this script" >&2; exit 1; }
   old_date="$(sed -n 's/^ARG JSONC_DATE=//p' "$dockerfile")"
   if [[ "$v" == "$old" && ( "$name" != JSONC || "${new[JSONC_DATE]}" == "$old_date" ) ]]; then
     continue
@@ -109,7 +118,7 @@ for name in POSTGRESQL GEOS PROJ GDAL JSONC ORAFCE PLJAVA UNIXODBC PSQLODBC PROT
 done
 
 # Every bundled component must be one this script knows, or a new one slipped in.
-known="postgresql geos proj gdal json-c orafce pljava unixodbc psqlodbc protobuf protobuf-c postgis pgaudit pgbackrest pgvector pg-failover-slots wal2json"
+known="postgresql postgresql-repmgr repmgr geos proj gdal json-c orafce pljava unixodbc psqlodbc protobuf protobuf-c postgis pgaudit pgbackrest pgvector pg-failover-slots wal2json"
 for c in $(sed -nE 's#^cd /bitnami/blacksmith-sandox/([a-z0-9-]+)-[0-9][0-9.]*\.tmp$#\1#p' <<<"$build_txt"); do
   [[ " $known " == *" $c "* ]] || { echo "sync: Bitnami now bundles '$c'; add it to the Dockerfile" >&2; exit 1; }
 done
@@ -117,16 +126,16 @@ done
 revision="$(sed -nE 's/.*IMAGE_REVISION="([0-9]+)".*/\1/p' <<<"$theirs")"
 set_arg IMAGE_REVISION "$revision"
 
-# The README names the one tag that matches a Bitnami tag exactly; keep it current.
+# The README names the one tag per image that matches a Bitnami tag exactly; keep it current.
 new_tag="$(arg POSTGRESQL_VERSION).0-debian-12-r$revision"
 readme="$(dirname "$0")/../README.md"
 if [[ "$new_tag" != "$old_tag" ]] && grep -qF "\`$old_tag\`" "$readme"; then
-  sed -i "s/\`${old_tag//./\\.}\`/\`$new_tag\`/" "$readme"
+  sed -i "$lines s/\`${old_tag//./\\.}\`/\`$new_tag\`/" "$readme"
   echo "  README tag $old_tag -> $new_tag"
 fi
 # A new minor also moves the badge, the examples and the action's test to it.
 if [[ "$(arg POSTGRESQL_VERSION)" != "$old_version" ]]; then
-  bash "$(dirname "$0")/readme-version.sh" "$old_version" "$(arg POSTGRESQL_VERSION)"
+  bash "$(dirname "$0")/readme-version.sh" "$old_version" "$(arg POSTGRESQL_VERSION)" $only
   echo "  README version $old_version -> $(arg POSTGRESQL_VERSION)"
 fi
 
