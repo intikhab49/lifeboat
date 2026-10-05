@@ -74,14 +74,15 @@ wait_ready "$p-0" || { say "failures: $failures"; exit 1; }
 node 1
 wait_ready "$p-1" || { say "failures: $failures"; exit 1; }
 
-say "repmgr: $(docker exec "$p-0" repmgr --version 2>&1)"
+# As root: UID 1001 has no passwd entry outside the entrypoint's nss_wrapper, and repmgr wants one.
+say "repmgr: $(docker exec -u root "$p-0" repmgr --version 2>&1)"
 say "repmgrd: $(docker exec "$p-0" repmgrd --version 2>&1)"
 say "extension: $(q "$p-0" "select extversion from pg_extension where extname = 'repmgr'" repmgr | sed 's/^/repmgr /')"
 docker exec -e PGPASSWORD=repmgrpw "$p-0" psql -h 127.0.0.1 -U repmgr -d repmgr -XtAq -c 'select 1' >/dev/null 2>&1 \
   && say "repmgr user can connect: yes" || fail "repmgr user cannot connect"
 say "pg-0 in recovery: $(q "$p-0" 'select pg_is_in_recovery()')"
 say "pg-1 in recovery: $(q "$p-1" 'select pg_is_in_recovery()')"
-wait_for "cluster" "pg-0 primary t;pg-1 standby t" 60 cluster "$p-0"
+wait_for "cluster" "pg-0 primary true;pg-1 standby true" 60 cluster "$p-0"
 q "$p-0" "create table repl_check (v text); insert into repl_check values ('before failover')" >/dev/null
 wait_for "replicated to pg-1" "before failover" 30 q "$p-1" 'select v from repl_check'
 docker exec -e PGPASSWORD=custompw "$p-1" psql -h 127.0.0.1 -U customuser -d customdb -XtAq -c 'select current_user' \
@@ -96,7 +97,7 @@ q "$p-1" "insert into repl_check values ('after failover')" >/dev/null || fail "
 docker start "$p-0" >/dev/null
 wait_for "pg-0 rejoined (in recovery)" "t" 180 q "$p-0" 'select pg_is_in_recovery()'
 wait_for "replicated to pg-0" "after failover" 60 q "$p-0" "select v from repl_check where v = 'after failover'"
-wait_for "cluster after failover" "pg-0 standby t;pg-1 primary t" 60 cluster "$p-1"
+wait_for "cluster after failover" "pg-0 standby true;pg-1 primary true" 60 cluster "$p-1"
 
 say "failures: $failures"
 exit $((failures > 0))

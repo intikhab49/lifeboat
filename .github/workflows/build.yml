@@ -104,6 +104,7 @@ jobs:
         run: bash scripts/cpu-compat.sh "$CI_IMAGE"
 
       - name: Behavior (postgresql - env vars, init scripts, extensions, replication; repmgr - failover)
+        shell: bash -eo pipefail {0} # so a failed check fails the step despite tee
         run: bash "scripts/${{ matrix.smoke }}" "$CI_IMAGE" | tee candidate.transcript
 
       - name: Start a kind cluster

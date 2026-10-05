@@ -10,7 +10,8 @@
 [![arch](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-ff5b1f)](#tags)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-**A drop-in replacement for `bitnami/postgresql`, rebuilt from upstream source.** Same paths,
+**A drop-in replacement for `bitnami/postgresql`, rebuilt from upstream source** (and for
+`bitnami/postgresql-repmgr`, [the HA image](#high-availability-postgresql-repmgr)). Same paths,
 scripts, environment variables and tags, so it works with Bitnami's Helm chart, your
 docker-compose files and your CI. Free to pull, amd64 and arm64, with pgvector, PostGIS and 50+
 extensions, and none of its binaries come from Broadcom.
@@ -83,6 +84,29 @@ pins one of Bitnami's old 17 or 16 tags, use `17` or `16`: a newer point release
 reads the same data directory, so nothing needs a dump and restore. The extensions are newer than in those builds (PostGIS 3.6.4 instead of 3.4.4, pgvector
 0.8.7 instead of 0.8.0 or 0.8.1), so after switching, run `SELECT postgis_extensions_upgrade();`
 and `ALTER EXTENSION vector UPDATE;` in the databases that use them.
+
+### High availability: postgresql-repmgr
+
+`ghcr.io/intikhab49/lifeboat/postgresql-repmgr` replaces `bitnami/postgresql-repmgr`, the image
+behind Bitnami's postgresql-ha chart: the same PostgreSQL build plus repmgr 5.5.0, with Bitnami's
+repmgr scripts, so automatic failover and `REPMGR_*` settings work as before.
+
+```bash
+helm install db oci://registry-1.docker.io/bitnamicharts/postgresql-ha \
+  --set postgresql.image.registry=ghcr.io --set postgresql.image.repository=intikhab49/lifeboat/postgresql-repmgr \
+  --set pgpool.image.repository=bitnamilegacy/pgpool \
+  --set global.security.allowInsecureImages=true
+```
+
+| Tag | Meaning |
+|---|---|
+| `18.6.0-debian-12-r18` | same version, OS and scripts revision as Bitnami's postgresql-repmgr tag of that name |
+| `18.6.0`, `18.6`, `18`, `latest` | moving tags of postgresql-repmgr, as on Bitnami |
+
+CI runs two nodes the way Bitnami's docker-compose.yml does, stops the primary, checks that the
+standby is promoted and that the old primary rejoins as a standby, then installs the postgresql-ha
+chart (16.3.2) and writes through pgpool. pgpool itself is not rebuilt here, so the chart still
+uses Bitnami's last public pgpool image from `bitnamilegacy`.
 
 ## GitHub Actions
 
@@ -214,6 +238,9 @@ The ones that change how something is built are marked `Deviation:` in the Docke
 - The SPDX files scanners read sit at the same paths with the same component names, minus three
   errors in Bitnami's: protobuf's CPE, psqlODBC's license and the missing Abseil entry.
 - The startup banner says lifeboat instead of "Welcome to the Bitnami postgresql container".
+- postgresql-repmgr: repmgr comes from EnterpriseDB's GitHub release, since `repmgr.org` no longer
+  serves the tarball (same file, same SHA-256), and its SPDX entry says GPL-3.0-or-later, as its
+  COPYRIGHT file does, where Bitnami's says GPL-3.0-only.
 
 ## FAQ
 
@@ -242,8 +269,8 @@ top of components built here. Not affiliated with Broadcom or Bitnami.
 Bitnami ships a new revision, a daily job opens a pull request with the new versions, which must
 pass the CPU and behavior checks.
 
-**What about Redis, MongoDB, Kafka and the others?** PostgreSQL is first. The same method works
-for any image whose package ships a `BUILD.txt`. [Ask for one](https://github.com/intikhab49/lifeboat/issues/new?template=image-request.yml).
+**What about Redis, MongoDB, Kafka and the others?** PostgreSQL and postgresql-repmgr are first.
+The same method works for any image whose package ships a `BUILD.txt`. [Ask for one](https://github.com/intikhab49/lifeboat/issues/new?template=image-request.yml).
 
 ## License
 

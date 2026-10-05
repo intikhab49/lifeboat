@@ -16,8 +16,8 @@ helm install db oci://registry-1.docker.io/bitnamicharts/postgresql-ha --version
   --set global.security.allowInsecureImages=true \
   --set postgresql.image.registry=docker.io --set postgresql.image.repository="$repository" \
   --set postgresql.image.tag="$tag" --set postgresql.image.pullPolicy=Never \
-  --set postgresql.replicaCount=2 --set postgresql.postgresPassword=chartpw \
-  --set postgresql.password=userpw --set postgresql.repmgrPassword=repmgrpw \
+  --set postgresql.replicaCount=2 --set postgresql.password=chartpw \
+  --set postgresql.repmgrPassword=repmgrpw \
   --set pgpool.image.repository=bitnamilegacy/pgpool --set pgpool.image.tag=4.6.3-debian-12-r0 \
   --set pgpool.adminPassword=adminpw \
   --wait --timeout 15m
@@ -41,4 +41,4 @@ echo "server via pgpool: $(sql "$(pod 0)" db-postgresql-ha-pgpool 'show server_v
 echo "node 1 in recovery: $(sql "$(pod 1)" 127.0.0.1 'select pg_is_in_recovery()')"
 echo "replicated row: ${replicated:-none}"
 echo "repmgr nodes: $nodes"
-[[ "$replicated" == "through pgpool" && "$nodes" == "primary t;standby t" ]]
+[[ "$replicated" == "through pgpool" && "$nodes" == "primary true;standby true" ]]
