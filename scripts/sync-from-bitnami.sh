@@ -89,6 +89,7 @@ url() {
 set_arg() { sed -i "s|^ARG $1=.*|ARG $1=$2|" "$dockerfile"; }
 arg() { sed -n "s/^ARG $1=//p" "$dockerfile"; }
 old_tag="$(arg POSTGRESQL_VERSION).0-debian-12-r$(arg IMAGE_REVISION)"
+old_version="$(arg POSTGRESQL_VERSION)"
 
 for name in POSTGRESQL GEOS PROJ GDAL JSONC ORAFCE PLJAVA UNIXODBC PSQLODBC PROTOBUF ABSEIL PROTOBUFC \
             POSTGIS PGAUDIT PGBACKREST PGVECTOR PGFAILOVERSLOTS WAL2JSON NSSWRAPPER; do
@@ -122,6 +123,11 @@ readme="$(dirname "$0")/../README.md"
 if [[ "$new_tag" != "$old_tag" ]] && grep -qF "\`$old_tag\`" "$readme"; then
   sed -i "s/\`${old_tag//./\\.}\`/\`$new_tag\`/" "$readme"
   echo "  README tag $old_tag -> $new_tag"
+fi
+# A new minor also moves the badge, the examples and the action's test to it.
+if [[ "$(arg POSTGRESQL_VERSION)" != "$old_version" ]]; then
+  bash "$(dirname "$0")/readme-version.sh" "$old_version" "$(arg POSTGRESQL_VERSION)"
+  echo "  README version $old_version -> $(arg POSTGRESQL_VERSION)"
 fi
 
 # Their runtime package list is ours too.

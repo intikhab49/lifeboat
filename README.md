@@ -77,7 +77,8 @@ are Bitnami's own scripts.
 Bitnami no longer releases 17 or 16. Their last public builds were `17.6.0-debian-12-r10` and
 `16.9.0-debian-12-r13`, and neither tag can be pulled from Docker Hub today. lifeboat runs the
 scripts from those two releases on the current point release of each major, with the same
-components as 18. If your setup pins one of Bitnami's old 17 or 16 tags, use `17` or `16`: a newer
+components as 18. A daily job opens a pull request when PostgreSQL ships a new point release of
+17 or 16, and every Bitnami sync of 18 carries its component updates to 17 and 16. If your setup pins one of Bitnami's old 17 or 16 tags, use `17` or `16`: a newer
 point release of the same major reads the same data directory, so nothing needs a dump and
 restore. The extensions are newer than in those builds (PostGIS 3.6.4 instead of 3.4.4, pgvector
 0.8.7 instead of 0.8.0 or 0.8.1), so after switching, run `SELECT postgis_extensions_upgrade();`
