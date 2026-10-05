@@ -94,7 +94,8 @@ repmgr scripts, so automatic failover and `REPMGR_*` settings work as before.
 ```bash
 helm install db oci://registry-1.docker.io/bitnamicharts/postgresql-ha \
   --set postgresql.image.registry=ghcr.io --set postgresql.image.repository=intikhab49/lifeboat/postgresql-repmgr \
-  --set pgpool.image.repository=bitnamilegacy/pgpool \
+  --set postgresql.image.tag=18 \
+  --set pgpool.image.repository=bitnamilegacy/pgpool --set pgpool.image.tag=4.6.3-debian-12-r0 \
   --set global.security.allowInsecureImages=true
 ```
 
@@ -199,6 +200,12 @@ Bitnami's last PostgreSQL 17 image, 17.6.0, does the same. In this repo's CI, on
 (AVX2, no AVX-512), its HNSW index build crashed the server, which restarted in recovery mode.
 lifeboat's 17 passed the same test on the same machine.
 
+CI now runs this check on Bitnami's own images in every build. In the run of 2026-10-05, all four
+(postgresql 18, its last 17 and 16 builds, 17.6.0 and 16.9.0, and postgresql-repmgr 18) failed
+pgvector's HNSW test on every older CPU above, on amd64 and arm64. On the two amd64 runners
+without AVX-512, Bitnami's 18 and 16 also crashed on the runner's own CPU. lifeboat's images
+passed every row.
+
 Check any copy with `scripts/cpu-compat.sh IMAGE`.
 
 ## Proof it's the same image
@@ -240,7 +247,9 @@ The ones that change how something is built are marked `Deviation:` in the Docke
 - The startup banner says lifeboat instead of "Welcome to the Bitnami postgresql container".
 - postgresql-repmgr: repmgr comes from EnterpriseDB's GitHub release, since `repmgr.org` no longer
   serves the tarball (same file, same SHA-256), and its SPDX entry says GPL-3.0-or-later, as its
-  COPYRIGHT file does, where Bitnami's says GPL-3.0-only.
+  COPYRIGHT file does, where Bitnami's says GPL-3.0-only. Bitnami built its repmgr package with
+  `/opt/bitnami/repmgr/lib` in every binary's RUNPATH and in `pg_config`'s flags; that directory
+  holds nothing, and lifeboat's binaries are the ones from the postgresql build, so it is left out.
 
 ## FAQ
 
