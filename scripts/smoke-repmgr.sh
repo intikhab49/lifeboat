@@ -92,6 +92,9 @@ docker exec -e PGPASSWORD=custompw "$p-1" psql -h 127.0.0.1 -U customuser -d cus
 docker stop -t 10 "$p-0" >/dev/null
 wait_for "pg-1 promoted (in recovery)" "f" 120 q "$p-1" 'select pg_is_in_recovery()'
 q "$p-1" "insert into repl_check values ('after failover')" >/dev/null || fail "pg-1 does not take writes"
+# A restarting node asks its partners which node is primary. Until repmgrd has recorded the
+# promotion, the answer is still pg-0, which would come back as a second primary, so wait for it.
+wait_for "failover recorded" "pg-0 primary false;pg-1 primary true" 60 cluster "$p-1"
 
 # --- the old primary comes back and follows the new one ---
 docker start "$p-0" >/dev/null
