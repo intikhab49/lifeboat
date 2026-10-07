@@ -1,3 +1,3 @@
 repo=https://github.com/bitnami/containers
 path=bitnami/postgresql-repmgr/18/debian-12
-commit=aa064a6e1c0cb20d10d219bed8583b2989ca04fc
+commit=d5e0ffedbe0ca93a0212e95f14a0023b503963ff

@@ -70,7 +70,7 @@ are Bitnami's own scripts.
 
 | Tag | Meaning |
 |---|---|
-| `18.6.0-debian-12-r16` | same version, OS and scripts revision as Bitnami's tag of that name |
+| `18.6.0-debian-12-r17` | same version, OS and scripts revision as Bitnami's tag of that name |
 | `18.6.0`, `18.6`, `18`, `latest` | moving tags, as on Bitnami |
 | `17.11.0`, `17.11`, `17` | PostgreSQL 17 |
 | `16.15.0`, `16.15`, `16` | PostgreSQL 16, with pg_auto_failover as in Bitnami's 16 |
@@ -101,7 +101,7 @@ helm install db oci://registry-1.docker.io/bitnamicharts/postgresql-ha \
 
 | Tag | Meaning |
 |---|---|
-| `18.6.0-debian-12-r18` | same version, OS and scripts revision as Bitnami's postgresql-repmgr tag of that name |
+| `18.6.0-debian-12-r19` | same version, OS and scripts revision as Bitnami's postgresql-repmgr tag of that name |
 | `18.6.0`, `18.6`, `18`, `latest` | moving tags of postgresql-repmgr, as on Bitnami |
 
 CI runs two nodes the way Bitnami's docker-compose.yml does, stops the primary, checks that the
