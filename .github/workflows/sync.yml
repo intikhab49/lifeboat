@@ -28,7 +28,7 @@ jobs:
             bash scripts/sync-from-bitnami.sh images/postgresql-repmgr/18/debian-12
             # 17, 16 and repmgr carry 18's components, so one pull request moves every image.
             bash scripts/align-majors.sh
-          } | tee sync.log
+          } | tee "$RUNNER_TEMP/sync.log" # outside the checkout, or it counts as a change below
           if [[ -n "$(git status --porcelain)" ]]; then echo "changed=true" >> "$GITHUB_OUTPUT"; fi
 
       - name: Open a pull request
@@ -55,7 +55,7 @@ jobs:
           git add -A images README.md action.yml .github/workflows/action-test.yml
           git commit -m "$title"
           git push origin "$branch"
-          printf 'Automated sync from bitnami/containers@%s.\n\n```\n%s\n```\n' "$commit" "$(cat sync.log)" > body.md
+          printf 'Automated sync from bitnami/containers@%s.\n\n```\n%s\n```\n' "$commit" "$(cat "$RUNNER_TEMP/sync.log")" > body.md
           # GitHub holds the pull_request run of a GITHUB_TOKEN pull request for approval, and the
           # build dispatched below doesn't show in the PR's checks, so the body links to it.
           printf '\nChecks: %s/%s/actions/workflows/build.yml?query=branch%%3A%s runs the build for this branch. The pull_request run waiting for approval runs the same checks.\n' \
@@ -74,7 +74,7 @@ jobs:
       - name: Move 17 and 16 to PostgreSQL's latest minors
         id: bump
         run: |
-          for major in 17 16; do bash scripts/bump-postgresql-minor.sh "$major"; done | tee bump.log
+          for major in 17 16; do bash scripts/bump-postgresql-minor.sh "$major"; done | tee "$RUNNER_TEMP/bump.log" # outside the checkout, or it counts as a change below
           if [[ -n "$(git status --porcelain)" ]]; then echo "changed=true" >> "$GITHUB_OUTPUT"; fi
 
       - name: Open a pull request
@@ -94,7 +94,7 @@ jobs:
           git add -A images/postgresql README.md action.yml .github/workflows/action-test.yml
           git commit -m "$title"
           git push origin "$branch"
-          printf 'New PostgreSQL point releases (https://www.postgresql.org/docs/release/).\n\n```\n%s\n```\n' "$(cat bump.log)" > body.md
+          printf 'New PostgreSQL point releases (https://www.postgresql.org/docs/release/).\n\n```\n%s\n```\n' "$(cat "$RUNNER_TEMP/bump.log")" > body.md
           printf '\nChecks: %s/%s/actions/workflows/build.yml?query=branch%%3A%s runs the build for this branch. The pull_request run waiting for approval runs the same checks.\n' \
             "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$branch" >> body.md
           gh pr create --base main --head "$branch" --title "$title" --body-file body.md
