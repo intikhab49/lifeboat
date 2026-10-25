@@ -101,7 +101,7 @@ helm install db oci://registry-1.docker.io/bitnamicharts/postgresql-ha \
 
 | Tag | Meaning |
 |---|---|
-| `18.6.0-debian-12-r26` | same version, OS and scripts revision as Bitnami's postgresql-repmgr tag of that name |
+| `18.6.0-debian-12-r27` | same version, OS and scripts revision as Bitnami's postgresql-repmgr tag of that name |
 | `18.6.0`, `18.6`, `18`, `latest` | moving tags of postgresql-repmgr, as on Bitnami |
 
 CI runs two nodes the way Bitnami's docker-compose.yml does, stops the primary, checks that the
