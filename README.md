@@ -6,7 +6,7 @@
 [![build](https://github.com/intikhab49/lifeboat/actions/workflows/build.yml/badge.svg)](https://github.com/intikhab49/lifeboat/actions/workflows/build.yml)
 [![GitHub Marketplace](https://img.shields.io/badge/Marketplace-lifeboat-ff5b1f?logo=github)](https://github.com/marketplace/actions/postgresql-with-pgvector-and-postgis-lifeboat)
 [![image](https://img.shields.io/badge/ghcr.io-lifeboat%2Fpostgresql-0e2a47?logo=docker&logoColor=white)](https://github.com/intikhab49/lifeboat/pkgs/container/lifeboat%2Fpostgresql)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18.6%20%7C%2017.11%20%7C%2016.15-336791?logo=postgresql&logoColor=white)](#tags)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18.6%20%7C%2017.12%20%7C%2016.16-336791?logo=postgresql&logoColor=white)](#tags)
 [![arch](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-ff5b1f)](#tags)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
@@ -72,8 +72,8 @@ are Bitnami's own scripts.
 |---|---|
 | `18.6.0-debian-12-r27` | same version, OS and scripts revision as Bitnami's tag of that name |
 | `18.6.0`, `18.6`, `18`, `latest` | moving tags, as on Bitnami |
-| `17.11.0`, `17.11`, `17` | PostgreSQL 17 |
-| `16.15.0`, `16.15`, `16` | PostgreSQL 16, with pg_auto_failover as in Bitnami's 16 |
+| `17.12.0`, `17.12`, `17` | PostgreSQL 17 |
+| `16.16.0`, `16.16`, `16` | PostgreSQL 16, with pg_auto_failover as in Bitnami's 16 |
 
 Bitnami no longer releases 17 or 16. Their last public builds were `17.6.0-debian-12-r10` and
 `16.9.0-debian-12-r13`, and neither tag can be pulled from Docker Hub today. lifeboat runs the
